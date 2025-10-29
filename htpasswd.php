@@ -78,7 +78,11 @@ class Htpasswd {
             $lines[] = $line;
         }
         $this->backup();
-        file_put_contents($this->path, implode("\n", $lines) . "\n");
+        $data = implode("\n", $lines) . "\n";
+        if (file_put_contents($this->path, $data, LOCK_EX) === false) {
+            throw new RuntimeException('Unable to write htpasswd file');
+        }
+        @chmod($this->path, 0600);
     }
 
     public function backup() {
@@ -86,14 +90,23 @@ class Htpasswd {
             return;
         }
         if (!is_dir($this->backupDir)) {
-            mkdir($this->backupDir, 0777, true);
+            if (!mkdir($this->backupDir, 0700, true) && !is_dir($this->backupDir)) {
+                throw new RuntimeException('Unable to create backup directory');
+            }
+        } else {
+            @chmod($this->backupDir, 0700);
         }
         $backupFile = rtrim($this->backupDir, '/') . '/' . basename($this->path) . '.' . date('YmdHis');
         if (file_exists($this->path)) {
-            copy($this->path, $backupFile);
+            if (!copy($this->path, $backupFile)) {
+                throw new RuntimeException('Unable to create backup copy');
+            }
         } else {
-            file_put_contents($backupFile, '');
+            if (file_put_contents($backupFile, '') === false) {
+                throw new RuntimeException('Unable to create empty backup copy');
+            }
         }
+        @chmod($backupFile, 0600);
     }
 
     public function listBackups() {
@@ -124,9 +137,17 @@ class Htpasswd {
         if (!is_file($file)) {
             throw new InvalidArgumentException('Backup not found');
         }
+        $backupDirReal = realpath($this->backupDir);
+        $fileReal = realpath($file);
+        if ($backupDirReal === false || $fileReal === false || strpos($fileReal, $backupDirReal . DIRECTORY_SEPARATOR) !== 0) {
+            throw new InvalidArgumentException('Invalid backup file');
+        }
         $data = file_get_contents($file);
         $this->backup();
-        file_put_contents($this->path, $data);
+        if (file_put_contents($this->path, $data, LOCK_EX) === false) {
+            throw new RuntimeException('Unable to restore htpasswd file');
+        }
+        @chmod($this->path, 0600);
     }
 }
 ?>
